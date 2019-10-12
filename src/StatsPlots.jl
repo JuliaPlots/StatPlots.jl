@@ -37,5 +37,6 @@ include("marginalhist.jl")
 include("bar.jl")
 include("dendrogram.jl")
 include("andrews.jl")
+include("clustermap.jl")
 
 end # module

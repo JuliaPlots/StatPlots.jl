@@ -21,7 +21,7 @@ function treepositions(hc::Hclust, useheight::Bool)
     return xs, ys
 end
 
-@recipe function f(hc::Hclust; useheight=true)
+@recipe function f(hc::Hclust; useheight=true, horizontal=false)
     typeof(useheight) <: Bool || error("'useheight' argument must be true or false")
 
     legend := false
@@ -34,5 +34,6 @@ end
     ylims --> (0, Inf)
     yshowaxis --> useheight
 
-    treepositions(hc, useheight)
+    xs, ys = treepositions(hc, useheight)
+    horizontal ? (ys, xs) : (xs, ys)
 end
