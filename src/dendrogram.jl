@@ -1,4 +1,4 @@
-function treepositions(hc::Hclust, useheight::Bool, orientation=:vertical)
+function treepositions(hc::Hclust, useheight::Bool, orientation)
 
     order = StatsBase.indexmap(hc.order)
     nodepos = Dict(-i => (float(order[i]), 0.0) for i in hc.order)
@@ -24,8 +24,9 @@ function treepositions(hc::Hclust, useheight::Bool, orientation=:vertical)
     end
 end
 
-@recipe function f(hc::Hclust; useheight=true, orientation=:vertical )
+@recipe function f(hc::Hclust; useheight=true, orientation=:vertical, leaflabel=string)
     typeof(useheight) <: Bool || error("'useheight' argument must be true or false")
+    nodeslabels = map(leaflabel, hc.order)
 
     legend --> false
     linecolor --> :black
@@ -34,7 +35,7 @@ end
         yforeground_color_axis --> :white
         ygrid --> false
         ylims --> (0.5, length(hc.order) + 0.5)
-        yticks --> (1:nnodes(hc), string.(1:nnodes(hc))[hc.order])
+        yticks --> (1:nnodes(hc), nodeslabels)
         if useheight
             hs=sum(hc.heights)
             xlims --> (0, hs+hs*0.01)
@@ -46,7 +47,7 @@ end
         xforeground_color_axis --> :white
         xgrid --> false
         xlims --> (0.5, length(hc.order) + 0.5)
-        xticks --> (1:nnodes(hc), string.(1:nnodes(hc))[hc.order])
+        xticks --> (1:nnodes(hc), nodeslabels)
         ylims --> (0, Inf)
         yshowaxis --> useheight
     end
