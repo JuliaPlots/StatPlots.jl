@@ -12,7 +12,8 @@ notch_width(q2, q4, N) = 1.58 * (q4-q2)/sqrt(N)
     notch = false,
     range = 1.5,
     outliers = true,
-    whisker_width = :half
+    whisker_width = :half,
+    percentiles = [0.25, 0.5, 0.75]
 )
     # if only y is provided, then x will be UnitRange 1:size(y,2)
     if typeof(x) <: AbstractRange
@@ -26,6 +27,7 @@ notch_width(q2, q4, N) = 1.58 * (q4-q2)/sqrt(N)
     texts = String[]
     glabels = sort(collect(unique(x)))
     warning = false
+    emptywarning = false
     outliers_x, outliers_y = zeros(0), zeros(0)
     bw = plotattributes[:bar_width]
     isnothing(bw) && (bw = 0.8)
@@ -39,6 +41,24 @@ notch_width(q2, q4, N) = 1.58 * (q4-q2)/sqrt(N)
 
         # compute quantiles
         q1, q2, q3, q4, q5 = quantile(values, Base.range(0, stop = 1, length = 5))
+
+        # ensure that only valid percentiles are requested (also removing the min + max to ensure lower + upper T gets rendered)
+        filter!(x -> x > 0 && x < 100, percentiles)
+
+        # if our validated percentiles result in an empty list, use default quartiles
+        if isempty(percentiles)
+            if !emptywarning
+                @warn("Zero valid percentiles were requested. Plotting using quartiles.")
+                emptywarning = true # Show the warning only one time
+            end
+            percentiles = [0.25, 0.5, 0.75]
+        end
+
+        # compute percentiles
+        ps = sort(quantile(values, unique(percentiles)))
+
+        # get minimum and maximum values which are not q1 or q5
+        pmin, pmax = extrema(ps)
 
         # notch
         n = notch_width(q2, q4, length(values))
@@ -61,10 +81,10 @@ notch_width(q2, q4, N) = 1.58 * (q4-q2)/sqrt(N)
 
         # outliers
         if Float64(range) != 0.0  # if the range is 0.0, the whiskers will extend to the data
-            limit = range * (q4 - q2)
+            limit = range * (pmax - pmin)
             inside = Float64[]
             for value in values
-                if (value < (q2 - limit)) || (value > (q4 + limit))
+                if (value < (pmin - limit)) || (value > (pmax + limit))
                     if outliers
                         push!(outliers_y, value)
                         push!(outliers_x, center)
@@ -76,79 +96,86 @@ notch_width(q2, q4, N) = 1.58 * (q4-q2)/sqrt(N)
             # change q1 and q5 to show outliers
             # using maximum and minimum values inside the limits
             q1, q5 = Plots.ignorenan_extrema(inside)
-            q1, q5 = (min(q1, q2), max(q4, q5)) # whiskers cannot be inside the box
+            q1, q5 = (min(q1, pmin), max(pmax, q5)) # whiskers cannot be inside the box
         end
         # Box
         push!(xsegs, m, lw, rw, m, m)       # lower T
-        push!(ysegs, q1, q1, q1, q1, q2)    # lower T
+        push!(ysegs, q1, q1, q1, q1, pmin)    # lower T
         push!(
             texts,
             "Lower fence: $q1",
             "Lower fence: $q1",
             "Lower fence: $q1",
             "Lower fence: $q1",
-            "Q1: $q2",
+            "Q1: $pmin",
             "",
         )
 
         if notch
-            push!(xsegs, r, r, R, L, l, l, r, r) # lower box
-            push!(xsegs, r, r, l, l, L, R, r, r) # upper box
+            # draw segments between requested percentile pairs, accounting for case where notch lies between percentiles
+            for (ii, (pa, pb)) in enumerate(zip(ps, ps[2:end]))
+                # determine if percentile window being processed falls within the notch
+                inlower = (q3 - n > pa) && (q3 - n < pb)
+                inupper = (q3 + n > pa) && (q3 + n < pb)
+                
+                # account for case where the percentile window falls in the upper portion of notch
+                if inupper
+                    push!(xsegs, r, r, l, l, L, R, r, r) # upper box
+                    push!(ysegs, q3 + n, pb, pb, q3 + n, q3, q3, q3 + n, pb) # upper box
+                    push!(texts, 
+                        "Q$ii: $pb",
+                        "Median: $q3 ± $n",
+                        "Median: $q3 ± $n",
+                        "Median: $q3 ± $n",
+                        "Median: $q3 ± $n",
+                        "Q$ii: $pb",
+                        "Q$ii: $pb",
+                        "Median: $q3 ± $n",
+                        "",
+                    )
+                end
 
-            push!(ysegs, q2, q3 - n, q3, q3, q3 - n, q2, q2, q3 - n) # lower box
-            push!(
-                texts,
-                "Q1: $q2",
-                "Median: $q3 ± $n",
-                "Median: $q3 ± $n",
-                "Median: $q3 ± $n",
-                "Median: $q3 ± $n",
-                "Q1: $q2",
-                "Q1: $q2",
-                "Median: $q3 ± $n",
-                "",
-            )
-
-            push!(ysegs, q3 + n, q4, q4, q3 + n, q3, q3, q3 + n, q4) # upper box
-            push!(
-                texts,
-                "Median: $q3 ± $n",
-                "Q3: $q4",
-                "Q3: $q4",
-                "Median: $q3 ± $n",
-                "Median: $q3 ± $n",
-                "Median: $q3 ± $n",
-                "Median: $q3 ± $n",
-                "Q3: $q4",
-                "",
-            )
+                # account for case where the percentile window falls in the lower portion of notch
+                if inlower
+                    push!(xsegs, r, r, R, L, l, l, r, r) # lower box
+                    push!(ysegs, pa, q3 - n, q3, q3, q3 - n, pa, pa, q3 - n) # lower box
+                    push!(texts, "Q$ii: $pa", 
+                        "Median: $q3 ± $n",
+                        "Median: $q3 ± $n",
+                        "Median: $q3 ± $n",
+                        "Median: $q3 ± $n",
+                        "Q$ii: $pa",
+                        "Q$ii: $pa",
+                        "Median: $q3 ± $n",
+                        "",
+                    )
+                end
+                
+                # account for case where the percentile window is completely outside the notch
+                if !inupper & !inlower
+                    push!(xsegs, r, r, l, l, r, r)
+                    push!(ysegs, pa, pb, pb, pa, pa, pb)
+                    push!(texts, "Q$ii: $pa", "Median: $pb", "Median: $pb", "Q$ii: $pa", "Q$ii: $pa", "Median: $pb", "")
+                end
+            end
         else
-            push!(xsegs, r, r, l, l, r, r)         # lower box
-            push!(xsegs, r, l, l, r, r, m)         # upper box
-            push!(ysegs, q2, q3, q3, q2, q2, q3)   # lower box
-            push!(
-                texts,
-                "Q1: $q2",
-                "Median: $q3",
-                "Median: $q3",
-                "Q1: $q2",
-                "Q1: $q2",
-                "Median: $q3",
-                "",
-            )
-            push!(ysegs, q4, q4, q3, q3, q4, q4)   # upper box
-            push!(texts, "Q3: $q4", "Q3: $q4", "Median: $q3", "Median: $q3", "Q3: $q4", "Q3: $q4", "")
+            # draw segments between requested percentile pairs
+            for (ii, (pa, pb)) in enumerate(zip(ps, ps[2:end]))
+                push!(xsegs, r, r, l, l, r, r)
+                push!(ysegs, pa, pb, pb, pa, pa, pb)
+                push!(texts, "Q$ii: $pa", "Median: $pb", "Median: $pb", "Q$ii: $pa", "Q$ii: $pa", "Median: $pb", "")
+            end
         end
 
         push!(xsegs, m, lw, rw, m, m)             # upper T
-        push!(ysegs, q5, q5, q5, q5, q4)          # upper T
+        push!(ysegs, q5, q5, q5, q5, pmax)          # upper T
         push!(
             texts,
             "Upper fence: $q5",
             "Upper fence: $q5",
             "Upper fence: $q5",
             "Upper fence: $q5",
-            "Q3: $q4",
+            "Q3: $pmax",
             "",
         )
 
